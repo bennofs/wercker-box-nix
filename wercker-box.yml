@@ -1,0 +1,40 @@
+name: nix
+version: 0.0.1
+type: main
+platform: ubuntu@12.04
+description: Box which with the nix package manager.
+keywords:
+  - nix
+script: |
+  sudo apt-get update
+  sudo apt-get install curl
+  curl https://nixos.org/nix/install | sh
+  source /nix/var/nix/profiles/default/etc/profile.d/nix.sh
+default-build:
+  nix:
+    priority: 50
+    detect:
+      - files:
+          - release.nix
+    text-to-append: |
+      build:
+        steps:
+          - script:
+              name: Setup environment
+              code: |
+                mkdir .derivations
+                ln -s $(nix-instantiate release.nix) .derivations/
+                nix-store --realise --dry-run .derivations/* |& sed -nre "s/^  //p" > .deps
+                [ -e "$WERCKER_CACHE_DIR/nix-cache" ] && nix-store --import < "$WERCKER_CACHE_DIR/nix-cache" || true
+          - script:
+              name: Build application
+              code: |
+                nix-store --realise .derivations/* --add-root result --indirect
+                cp -rL result $WERCKER_OUTPUT_DIR/result
+          - script:
+              name: Save Nix cache
+              code: >
+                nix-store --export $(
+                cat <(grep -v ".drv$" .deps) <(grep ".drv$" .deps | xargs nix-store -q --outputs) |
+                (while read; do [ -e "$REPLY" ] && echo "$REPLY"; done)
+                ) > "$WERCKER_CACHE_DIR/nix-cache"
